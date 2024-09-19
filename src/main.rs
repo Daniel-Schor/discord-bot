@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::env;
-use std::fs::File;
-use std::io::Read;
 
 use dotenv::dotenv;
 use serenity::{
@@ -9,6 +7,8 @@ use serenity::{
     model::{channel::Message, gateway::Ready},
     prelude::*,
 };
+
+mod commands; 
 
 struct Handler {
     commands: HashMap<String, String>,
@@ -33,18 +33,8 @@ impl EventHandler for Handler {
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
-
-    // Read the commands from the commands.json file
-    let mut file = File::open("commands.json").expect("Could not open commands.json");
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .expect("Could not read commands.json");
-
-    let commands: HashMap<String, String> =
-        serde_json::from_str(&contents).expect("Could not parse commands.json");
-
+    let commands: HashMap<String, String> = commands::get_commands();
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = Client::builder(&token, intents)
