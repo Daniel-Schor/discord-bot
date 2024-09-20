@@ -1,8 +1,8 @@
 use chrono::Utc;
 use commands::get_commands;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::collections::HashMap;
 
 use dotenv::dotenv;
 use serenity::{
@@ -20,8 +20,7 @@ use serenity::{
 
 mod commands;
 
-struct Handler {
-}
+struct Handler {}
 
 fn get_current_timestamp() -> u64 {
     Utc::now().timestamp() as u64 // Get timestamp as u64
@@ -98,6 +97,16 @@ impl EventHandler for Handler {
             if let Some(user_data) = users.get_mut(&new.user_id.to_string()) {
                 if user_data.get("timestamp").unwrap() == &0 {
                     user_data.insert("timestamp".to_string(), get_current_timestamp());
+                } else {
+                    // TODO redundan
+                    if let Some(user_data) = users.get_mut(&new.user_id.to_string()) {
+                        let duration = elapsed_time(*user_data.get("timestamp").unwrap())
+                            + user_data.get("duration").unwrap();
+                        // remove timestamp
+                        user_data.insert("timestamp".to_string(), 0);
+                        user_data.insert("duration".to_string(), duration);
+                    }
+                    //
                 }
             } else {
                 // if user is not in hashmap -> add user to hashmap
@@ -127,6 +136,7 @@ impl EventHandler for Handler {
         // leaves voice channel
         else if new.channel_id.is_none() {
             // add up duration
+            // TODO redundan
             if let Some(user_data) = users.get_mut(&new.user_id.to_string()) {
                 let duration = elapsed_time(*user_data.get("timestamp").unwrap())
                     + user_data.get("duration").unwrap();
@@ -134,6 +144,7 @@ impl EventHandler for Handler {
                 user_data.insert("timestamp".to_string(), 0);
                 user_data.insert("duration".to_string(), duration);
             }
+            //
             if let Err(why) = channel_id
                 .say(
                     &ctx.http,
@@ -164,7 +175,7 @@ async fn main() {
     //let users: HashMap<String, String> = HashMap::from("337690647404347393", );
 
     let mut client = Client::builder(&token, intents)
-        .event_handler(Handler {  })
+        .event_handler(Handler {})
         .await
         .expect("Error creating client");
 
