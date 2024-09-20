@@ -1,6 +1,7 @@
 use chrono::Utc;
 use std::env;
-use std::{collections::HashMap, fs};
+use std::fs;
+use std::collections::HashMap;
 
 use dotenv::dotenv;
 use serenity::{
