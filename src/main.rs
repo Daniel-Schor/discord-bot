@@ -8,9 +8,9 @@ use serenity::{
     model::{
         channel::Message,
         gateway::Ready,
-        guild::Member,
-        id::{ChannelId, GuildId}, // Add GuildId
-        voice::VoiceState,        // Add VoiceState for handling voice events
+        //guild::Member,
+        id::ChannelId, //{ChannelId, GuildId},
+        voice::VoiceState, 
     },
     prelude::*,
 };
