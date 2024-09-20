@@ -1,4 +1,5 @@
 use chrono::Utc;
+use commands::get_commands;
 use std::env;
 use std::fs;
 use std::collections::HashMap;
@@ -20,7 +21,6 @@ use serenity::{
 mod commands;
 
 struct Handler {
-    commands: HashMap<String, String>,
 }
 
 fn get_current_timestamp() -> u64 {
@@ -39,7 +39,8 @@ impl EventHandler for Handler {
     // Message sent (anywhere) event
     async fn message(&self, ctx: Context, msg: Message) {
         // Check if the message content matches any command
-        if let Some(response) = self.commands.get(&msg.content) {
+        let commands = get_commands();
+        if let Some(response) = commands.get(&msg.content) {
             if let Err(why) = msg.channel_id.say(&ctx.http, response).await {
                 println!("Error sending message: {:?}", why);
             }
@@ -156,7 +157,6 @@ impl EventHandler for Handler {
 async fn main() {
     dotenv().ok();
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
-    let commands: HashMap<String, String> = commands::get_commands();
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
@@ -164,7 +164,7 @@ async fn main() {
     //let users: HashMap<String, String> = HashMap::from("337690647404347393", );
 
     let mut client = Client::builder(&token, intents)
-        .event_handler(Handler { commands })
+        .event_handler(Handler {  })
         .await
         .expect("Error creating client");
 

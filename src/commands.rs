@@ -21,7 +21,6 @@ pub fn get_commands() -> HashMap<String, String> {
         ("!test".to_string(), "This is a test".to_string()),
     ]);
 
-    // TODO update when called
     // building user stats
     let users = get_users();
     let mut users_stats = String::from("User time spent in voice channels:\n");
