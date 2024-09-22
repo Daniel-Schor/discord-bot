@@ -56,7 +56,7 @@ impl EventHandler for Handler {
                 .channel_id
                 .say(
                     &ctx.http,
-                    format!("Votekick: <@{}>\n Please vote '👍'", msg.mentions[0].id),
+                    format!("Timeout: <@{}> for 1 min.\n Please vote with a ✅ on this message.", msg.mentions[0].id),
                 )
                 .await
             {
@@ -101,7 +101,7 @@ impl EventHandler for Handler {
             reaction.message_id.get()
         );
 
-        if reaction.emoji == ReactionType::Unicode("👍".to_string()) {
+        if reaction.emoji == ReactionType::Unicode("✅".to_string()) {
             // get vote_handler from ctx.data
             // Begin accessing the data map
             let mut data = ctx.data.write().await;
@@ -116,7 +116,7 @@ impl EventHandler for Handler {
                 let mut count = vote_handler.vote_counts.get_mut(&msg_id).unwrap().1;
                 count += 1;
 
-                if count >= 2 { // Assuming 3 votes are needed to timeout
+                if count >= 1 {
                     vote_handler.vote_counts.insert(msg_id, (user_id, 0));
                 
                     // Get the guild ID and fetch the member

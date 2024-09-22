@@ -39,6 +39,9 @@ pub fn get_commands() -> HashMap<String, String> {
 
     // building commands list
     let mut joined_keys = String::from("Other commands:\n");
+    joined_keys.push_str("- ");
+    joined_keys.push_str("!timeout @<user>");
+    joined_keys.push_str("\n");
 
     for key in commands.keys() {
         joined_keys.push_str("- ");
