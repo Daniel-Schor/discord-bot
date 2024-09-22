@@ -1,37 +1,20 @@
-use chrono::Utc;
 use commands::get_commands;
 use std::collections::HashMap;
 use std::env;
-use std::fs;
 
 use dotenv::dotenv;
 use serenity::{
     all::Reaction,
     async_trait,
-    model::{
-        channel::Message,
-        gateway::Ready,
-        //guild::Member,
-        id::ChannelId, //{ChannelId, GuildId},
-        voice::VoiceState,
-    },
+    model::{channel::Message, gateway::Ready, voice::VoiceState},
     prelude::*,
 };
 
 mod commands;
+mod date_helper;
+mod json_helper;
 
 struct Handler {}
-
-fn get_current_timestamp() -> u64 {
-    Utc::now().timestamp() as u64 // Get timestamp as u64
-}
-
-fn elapsed_time(start_timestamp: u64) -> u64 {
-    let current_timestamp = get_current_timestamp();
-    current_timestamp - start_timestamp
-}
-
-const BOT_LOG: u64 = 1286760071623217244;
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -48,116 +31,70 @@ impl EventHandler for Handler {
 
     // Bot (self) joins server event
     async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+        println!(
+            "{}: {} is connected!",
+            date_helper::timestamp_string(),
+            ready.user.name
+        );
     }
 
     // Reaction added event
-    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
+    async fn reaction_add(&self, _ctx: Context, reaction: Reaction) {
         // bot-log channel id
-        let channel_id = ChannelId::new(BOT_LOG);
-        if let Err(why) = channel_id
-            .say(
-                &ctx.http,
-                format!(
-                    "User <@{}> added a reaction to message {}",
-                    reaction.user_id.unwrap().get(),
-                    format!(
-                        "https://discord.com/channels/{}/{}/{}",
-                        reaction.guild_id.unwrap().get(),
-                        reaction.channel_id.get(),
-                        reaction.message_id.get()
-                    )
-                ),
-            )
-            .await
-        {
-            println!("Error sending message: {:?}", why);
-        }
+        println!(
+            "{}: User <@{}> added a reaction to message: https://discord.com/channels/{}/{}/{}",
+            date_helper::timestamp_string(),
+            reaction.user_id.unwrap().get(),
+            reaction.guild_id.unwrap().get(),
+            reaction.channel_id.get(),
+            reaction.message_id.get()
+        );
     }
 
     // Joined a voice channel event
-    async fn voice_state_update(&self, ctx: Context, old: Option<VoiceState>, new: VoiceState) {
-        let channel_id = ChannelId::new(1286760071623217244); // Define the target channel ID
-
+    async fn voice_state_update(&self, _ctx: Context, old: Option<VoiceState>, new: VoiceState) {
         // load json to hashmap
-        let data = match fs::read_to_string("users.json") {
-            Ok(content) => content,
-            Err(e) => {
-                eprintln!("Error reading file: {}", e);
-                String::new()
-            }
-        };
+        let mut users = json_helper::get_users();
 
-        let mut users =
-            serde_json::from_str::<HashMap<String, HashMap<String, u64>>>(&data).unwrap();
-
-        // Check if a user joins a voice channel
+        // Check if a user joins/switches a voice channel
         if old.is_none() && new.channel_id.is_some() {
-            // if user has no timestamp -> add timestamp
+            // if user has no timestamp -> add timestamp (if users has timestamp -> user switched channel)
             if let Some(user_data) = users.get_mut(&new.user_id.to_string()) {
                 if user_data.get("timestamp").unwrap() == &0 {
-                    user_data.insert("timestamp".to_string(), get_current_timestamp());
-                } else {
-                    // TODO redundan
-                    if let Some(user_data) = users.get_mut(&new.user_id.to_string()) {
-                        let duration = elapsed_time(*user_data.get("timestamp").unwrap())
-                            + user_data.get("duration").unwrap();
-                        // remove timestamp
-                        user_data.insert("timestamp".to_string(), 0);
-                        user_data.insert("duration".to_string(), duration);
-                    }
-                    //
+                    user_data.insert("timestamp".to_string(), date_helper::timestamp());
                 }
             } else {
-                // if user is not in hashmap -> add user to hashmap
+                // -> new user joins channel
                 users.insert(
                     new.user_id.to_string(),
                     HashMap::from([
-                        ("timestamp".to_string(), get_current_timestamp()),
-                        ("duration".to_string(), 0u64),
+                        ("timestamp".to_string(), date_helper::timestamp()),
+                        ("duration".to_string(), 0),
                     ]),
                 );
             }
 
-            if let Err(why) = channel_id
-                .say(
-                    &ctx.http,
-                    format!(
-                        "User <@{}> joined voice channel <#{}>",
-                        new.user_id,
-                        new.channel_id.unwrap().get()
-                    ),
-                )
-                .await
-            {
-                println!("Error sending message: {:?}", why);
-            }
+            println!("{}: User <@{}> joined voice channel <#{}>",date_helper::timestamp_string(),new.user_id,new.channel_id.unwrap().get());
         }
         // leaves voice channel
         else if new.channel_id.is_none() {
             // add up duration
-            // TODO redundan
             if let Some(user_data) = users.get_mut(&new.user_id.to_string()) {
-                let duration = elapsed_time(*user_data.get("timestamp").unwrap())
+                let duration = date_helper::elapsed_time(*user_data.get("timestamp").unwrap())
                     + user_data.get("duration").unwrap();
                 // remove timestamp
                 user_data.insert("timestamp".to_string(), 0);
                 user_data.insert("duration".to_string(), duration);
             }
             //
-            if let Err(why) = channel_id
-                .say(
-                    &ctx.http,
-                    format!("User <@{}> left voice channel", new.user_id),
-                )
-                .await
-            {
-                println!("Error sending message: {:?}", why);
-            }
+            println!(
+                "{}: User <@{}> left voice channel",
+                date_helper::timestamp_string(),
+                new.user_id
+            );
         }
         // load hashmap to json
-        let data = serde_json::to_string(&users).unwrap();
-        fs::write("users.json", data).expect("Unable to write file");
+        json_helper::set_users(users);
     }
     // OTHER EVENTS HERE
 
@@ -172,7 +109,6 @@ async fn main() {
         | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
         | GatewayIntents::GUILD_VOICE_STATES;
-    //let users: HashMap<String, String> = HashMap::from("337690647404347393", );
 
     let mut client = Client::builder(&token, intents)
         .event_handler(Handler {})
@@ -180,6 +116,10 @@ async fn main() {
         .expect("Error creating client");
 
     if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
+        println!(
+            "{}: Client error: {:?}",
+            date_helper::timestamp_string(),
+            why
+        );
     }
 }
