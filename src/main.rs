@@ -4,7 +4,7 @@ use std::env;
 
 use dotenv::dotenv;
 use serenity::{
-    all::Reaction,
+    all::{MessageId, Reaction, ReactionType, UserId},
     async_trait,
     model::{channel::Message, gateway::Ready, voice::VoiceState},
     prelude::*,
@@ -14,7 +14,13 @@ mod commands;
 mod date_helper;
 mod json_helper;
 
-struct Handler {}
+struct Handler {
+    vote_handler: VoteHandler,
+}
+
+struct VoteHandler {
+    vote_counts: HashMap<u64, (u64, u64)>, // Message ID -> (User ID, Count)
+}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -25,6 +31,44 @@ impl EventHandler for Handler {
         if let Some(response) = commands.get(&msg.content) {
             if let Err(why) = msg.channel_id.say(&ctx.http, response).await {
                 println!("Error sending message: {:?}", why);
+            }
+        }
+        // Votekick command
+        else if msg.content.starts_with("!timeout") {
+            let args: Vec<&str> = msg.content.split_whitespace().collect();
+
+            if args.len() < 2 || msg.mentions.is_empty() {
+                if let Err(why) = msg
+                    .channel_id
+                    .say(&ctx.http, "Please add mention user and retry.")
+                    .await
+                {
+                    println!("Error sending message: {:?}", why);
+                }
+                return;
+            }
+            if let Err(why) = msg
+                .channel_id
+                .say(
+                    &ctx.http,
+                    format!("Votekick: <@{}>\n Please vote '👍'", msg.mentions[0].id),
+                )
+                .await
+            {
+                println!("Error sending message: {:?}", why);
+            } else {
+                let message = msg.id;
+                print!(
+                    "Message ID: {} , (User ID: {} , 0)",
+                    message, msg.mentions[0].id
+                );
+                // TODO add to vote_handler
+                // add message to vote_counts
+                /*
+                self.vote_handler
+                    .vote_counts
+                    .insert(message.get(), (msg.mentions[0].id.get(), 0));
+                */
             }
         }
     }
@@ -39,7 +83,7 @@ impl EventHandler for Handler {
     }
 
     // Reaction added event
-    async fn reaction_add(&self, _ctx: Context, reaction: Reaction) {
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
         // bot-log channel id
         println!(
             "{}: User <@{}> added a reaction to message: https://discord.com/channels/{}/{}/{}",
@@ -49,6 +93,25 @@ impl EventHandler for Handler {
             reaction.channel_id.get(),
             reaction.message_id.get()
         );
+
+        if reaction.emoji == ReactionType::Unicode("👍".to_string()) {
+            print!("👍");
+            // TODO implement vote logic
+            // check if message is in vote_counts
+            // update message vote count
+            // check if vote count is enough
+            // kick user
+
+            /*ctx.data.write().await.insert::<VoteHandler>(VoteHandler {
+                vote_counts: HashMap::new(),
+            });
+            // Check if this message is part of a votekick
+            if let Some((user_to_kick, count)) = handler.vote_counts.get_mut(&reaction.message_id) {
+                // Increase the vote count
+                *count += 1;
+                println!("Vote count for user {} is now {}", user_to_kick, count);
+            }*/
+        }
     }
 
     // Joined a voice channel event
@@ -74,7 +137,12 @@ impl EventHandler for Handler {
                 );
             }
 
-            println!("{}: User <@{}> joined voice channel <#{}>",date_helper::timestamp_string(),new.user_id,new.channel_id.unwrap().get());
+            println!(
+                "{}: User <@{}> joined voice channel <#{}>",
+                date_helper::timestamp_string(),
+                new.user_id,
+                new.channel_id.unwrap().get()
+            );
         }
         // leaves voice channel
         else if new.channel_id.is_none() {
@@ -111,7 +179,11 @@ async fn main() {
         | GatewayIntents::GUILD_VOICE_STATES;
 
     let mut client = Client::builder(&token, intents)
-        .event_handler(Handler {})
+        .event_handler(Handler {
+            vote_handler: VoteHandler {
+                vote_counts: HashMap::new(),
+            },
+        })
         .await
         .expect("Error creating client");
 
