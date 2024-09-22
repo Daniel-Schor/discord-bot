@@ -61,10 +61,6 @@ impl EventHandler for Handler {
                 .await
             {
                 let msg_id = votekick_message.id;
-                println!(
-                    "Message ID: {} , (User ID: {} , 0)",
-                    msg_id, msg.mentions[0].id
-                );
 
                 // Begin accessing the data map
                 let mut data = ctx.data.write().await;
@@ -72,7 +68,6 @@ impl EventHandler for Handler {
                     vote_handler
                         .vote_counts
                         .insert(msg_id.get(), (msg.mentions[0].id.get(), 0));
-                    println!("DEBUG: {:?}", vote_handler.vote_counts);
                 } else {
                     println!("Error: VoteHandler not found in TypeMap.");
                 }
@@ -121,21 +116,41 @@ impl EventHandler for Handler {
                 let mut count = vote_handler.vote_counts.get_mut(&msg_id).unwrap().1;
                 count += 1;
 
-                if count >= 1 {
+                if count >= 2 { // Assuming 3 votes are needed to timeout
                     vote_handler.vote_counts.insert(msg_id, (user_id, 0));
-                    
-                    // TODO timeout logic
-                    /*if let Err(why) = member.disable_communication_until(&ctx.http, timeout_duration).await {
-                        println!("Error banning user: {:?}", why);
-                    }*/
-
+                
+                    // Get the guild ID and fetch the member
+                    if let Some(guild_id) = reaction.guild_id {
+                        // Fetch the member object for the user
+                        if let Ok(mut member) = guild_id.member(&ctx.http, user_id).await {
+                            // Set the timeout duration (1 minute from now)
+                            let timeout_duration = chrono::Utc::now() + chrono::Duration::minutes(1);
+                            
+                            // Convert to serenity's Timestamp
+                            let timeout_timestamp: serenity::model::Timestamp = timeout_duration.into();
+                
+                            // Disable communication for the specified duration
+                            if let Err(why) = member.disable_communication_until_datetime(&ctx.http, timeout_timestamp).await {
+                                println!("Error muting user: {:?}", why);
+                            } else {
+                                println!("{}: User <@{}> has been muted for 1 minute.", date_helper::timestamp_string(), user_id);
+                
+                                // Notify the channel that the user has been muted
+                                if let Err(why) = reaction.channel_id.say(&ctx.http, format!("<@{}> has been muted for 1 minute.", user_id)).await {
+                                    println!("Error sending message: {:?}", why);
+                                }
+                            }
+                        } else {
+                            println!("Could not find member in the guild.");
+                        }
+                    } else {
+                        println!("Reaction did not occur in a guild.");
+                    }
                 } else {
-
                     vote_handler.vote_counts.insert(msg_id, (user_id, count));
                 }
-
-
-                println!("msg_id: {} user_id: {} count: {}", msg_id, user_id, count);
+                
+                
             } else {
                 println!("Error: VoteHandler not found in TypeMap.");
             }
@@ -205,6 +220,7 @@ async fn main() {
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
+        | GatewayIntents::GUILD_MEMBERS
         | GatewayIntents::GUILD_VOICE_STATES;
 
     let mut client = Client::builder(&token, intents)
