@@ -22,6 +22,10 @@ struct VoteHandler {
     vote_counts: HashMap<u64, (u64, u64)>, // Message ID -> (User ID, Count)
 }
 
+impl TypeMapKey for VoteHandler {
+    type Value = VoteHandler;
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     // Message sent (anywhere) event
@@ -47,7 +51,8 @@ impl EventHandler for Handler {
                 }
                 return;
             }
-            if let Err(why) = msg
+
+            if let Ok(votekick_message) = msg
                 .channel_id
                 .say(
                     &ctx.http,
@@ -55,31 +60,38 @@ impl EventHandler for Handler {
                 )
                 .await
             {
-                println!("Error sending message: {:?}", why);
-            } else {
-                let message = msg.id;
-                print!(
+                let msg_id = votekick_message.id;
+                println!(
                     "Message ID: {} , (User ID: {} , 0)",
-                    message, msg.mentions[0].id
+                    msg_id, msg.mentions[0].id
                 );
-                // TODO add to vote_handler
-                // add message to vote_counts
-                /*
-                self.vote_handler
-                    .vote_counts
-                    .insert(message.get(), (msg.mentions[0].id.get(), 0));
-                */
+
+                // Begin accessing the data map
+                let mut data = ctx.data.write().await;
+                if let Some(vote_handler) = data.get_mut::<VoteHandler>() {
+                    vote_handler
+                        .vote_counts
+                        .insert(msg_id.get(), (msg.mentions[0].id.get(), 0));
+                    println!("DEBUG: {:?}", vote_handler.vote_counts);
+                } else {
+                    println!("Error: VoteHandler not found in TypeMap.");
+                }
             }
         }
     }
 
     // Bot (self) joins server event
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         println!(
             "{}: {} is connected!",
             date_helper::timestamp_string(),
             ready.user.name
         );
+
+        let mut data = ctx.data.write().await;
+        data.insert::<VoteHandler>(VoteHandler {
+            vote_counts: HashMap::new(),
+        });
     }
 
     // Reaction added event
@@ -95,22 +107,39 @@ impl EventHandler for Handler {
         );
 
         if reaction.emoji == ReactionType::Unicode("👍".to_string()) {
-            print!("👍");
-            // TODO implement vote logic
-            // check if message is in vote_counts
-            // update message vote count
-            // check if vote count is enough
-            // kick user
+            // get vote_handler from ctx.data
+            // Begin accessing the data map
+            let mut data = ctx.data.write().await;
+            if let Some(vote_handler) = data.get_mut::<VoteHandler>() {
+                let msg_id = reaction.message_id.get();
+                // if message is not a vote -> return
+                if !vote_handler.vote_counts.contains_key(&msg_id) {
+                    println!("Not a vote message. {:?} {}", vote_handler.vote_counts, &msg_id);
+                    return;
+                }
+                let user_id = vote_handler.vote_counts.get(&msg_id).unwrap().0;
+                let mut count = vote_handler.vote_counts.get_mut(&msg_id).unwrap().1;
+                count += 1;
 
-            /*ctx.data.write().await.insert::<VoteHandler>(VoteHandler {
-                vote_counts: HashMap::new(),
-            });
-            // Check if this message is part of a votekick
-            if let Some((user_to_kick, count)) = handler.vote_counts.get_mut(&reaction.message_id) {
-                // Increase the vote count
-                *count += 1;
-                println!("Vote count for user {} is now {}", user_to_kick, count);
-            }*/
+                if count >= 1 {
+                    vote_handler.vote_counts.insert(msg_id, (user_id, 0));
+                    
+                    // TODO timeout logic
+                    /*if let Err(why) = member.disable_communication_until(&ctx.http, timeout_duration).await {
+                        println!("Error banning user: {:?}", why);
+                    }*/
+
+                } else {
+
+                    vote_handler.vote_counts.insert(msg_id, (user_id, count));
+                }
+
+
+                println!("msg_id: {} user_id: {} count: {}", msg_id, user_id, count);
+            } else {
+                println!("Error: VoteHandler not found in TypeMap.");
+            }
+            // -----------
         }
     }
 
