@@ -1,6 +1,6 @@
 use commands::get_commands;
-use std::collections::HashMap;
 use std::env;
+use std::{collections::HashMap, time::Instant};
 
 use dotenv::dotenv;
 use serenity::{
@@ -14,18 +14,22 @@ mod commands;
 mod date_helper;
 mod json_helper;
 
+const VOTE_DURATION: u64 = 180; // 3 minute
+const STD_TIMEOUT_DURATION: u64 = 1; // 1 minute
+
 struct Handler {
     vote_handler: VoteHandler,
 }
 
 struct VoteHandler {
-    vote_counts: HashMap<u64, (u64, u64)>, // Message ID -> (User ID, Count)
+    vote_counts: HashMap<u64, (u64, u64, Instant)>, // Message ID -> (User ID, Count)
 }
 
 impl TypeMapKey for VoteHandler {
     type Value = VoteHandler;
 }
 
+// TODO add optional timeout duration (also -> votekick_vote) (maybe extend VoteHandler)
 async fn votekick_init(ctx: &Context, msg: &Message) {
     let args: Vec<&str> = msg.content.split_whitespace().collect();
 
@@ -45,8 +49,9 @@ async fn votekick_init(ctx: &Context, msg: &Message) {
         .say(
             &ctx.http,
             format!(
-                "Timeout: <@{}> for 1 min.\n Please vote with a ✅ on this message.",
-                msg.mentions[0].id
+                "Timeout: <@{}> for 1 min.\n Please vote with a ✅ on this message. This vote will end in {} seconds.",
+                msg.mentions[0].id,
+                VOTE_DURATION
             ),
         )
         .await
@@ -58,7 +63,13 @@ async fn votekick_init(ctx: &Context, msg: &Message) {
         if let Some(vote_handler) = data.get_mut::<VoteHandler>() {
             vote_handler
                 .vote_counts
-                .insert(msg_id.get(), (msg.mentions[0].id.get(), 0));
+                .insert(msg_id.get(), (msg.mentions[0].id.get(), 0, Instant::now()));
+
+            let ctx_clone = ctx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(VOTE_DURATION)).await;
+                votekick_remove(&ctx_clone, &votekick_message).await;
+            });
         } else {
             println!("Error: VoteHandler not found in TypeMap.");
         }
@@ -84,15 +95,15 @@ async fn votekick_vote(ctx: &Context, reaction: &Reaction) {
             let mut count = vote_handler.vote_counts.get_mut(&msg_id).unwrap().1;
             count += 1;
 
-            if count >= 1 {
-                vote_handler.vote_counts.insert(msg_id, (user_id, 0));
+            if count >= 2 {
+                vote_handler.vote_counts.remove(&msg_id);
 
                 // Get the guild ID and fetch the member
                 if let Some(guild_id) = reaction.guild_id {
                     // Fetch the member object for the user
                     if let Ok(mut member) = guild_id.member(&ctx.http, user_id).await {
-                        // Set the timeout duration (1 minute from now)
-                        let timeout_duration = chrono::Utc::now() + chrono::Duration::minutes(1);
+                        // Set the timeout duration
+                        let timeout_duration = chrono::Utc::now() + chrono::Duration::minutes(STD_TIMEOUT_DURATION as i64);
 
                         // Convert to serenity's Timestamp
                         let timeout_timestamp: serenity::model::Timestamp = timeout_duration.into();
@@ -105,9 +116,10 @@ async fn votekick_vote(ctx: &Context, reaction: &Reaction) {
                             println!("Error muting user: {:?}", why);
                         } else {
                             println!(
-                                "{}: User <@{}> has been muted for 1 minute.",
+                                "{}: User <@{}> has been muted for {} minute.",
                                 date_helper::timestamp_string(),
-                                user_id
+                                user_id,
+                                STD_TIMEOUT_DURATION
                             );
 
                             // Notify the channel that the user has been muted
@@ -115,7 +127,7 @@ async fn votekick_vote(ctx: &Context, reaction: &Reaction) {
                                 .channel_id
                                 .say(
                                     &ctx.http,
-                                    format!("<@{}> has been muted for 1 minute.", user_id),
+                                    format!("<@{}> has been muted for {} minute.", user_id, STD_TIMEOUT_DURATION),
                                 )
                                 .await
                             {
@@ -129,11 +141,37 @@ async fn votekick_vote(ctx: &Context, reaction: &Reaction) {
                     println!("Reaction did not occur in a guild.");
                 }
             } else {
-                vote_handler.vote_counts.insert(msg_id, (user_id, count));
+                vote_handler.vote_counts.insert(msg_id, (user_id, count, vote_handler.vote_counts.get(&msg_id).unwrap().2));
             }
         } else {
             println!("Error: VoteHandler not found in TypeMap.");
         }
+    }
+}
+
+async fn votekick_remove(ctx: &Context, message: &Message) {
+    let mut data = ctx.data.write().await;
+    let msg_id = message.id.get();
+    if let Some(vote_handler) = data.get_mut::<VoteHandler>() {
+        // if message is not a vote -> return
+        if !vote_handler.vote_counts.contains_key(&msg_id) {
+            return;
+        }
+
+        if let Err(why) = message
+            .channel_id
+            .say(
+                &ctx.http,
+                format!(
+                    "Vote for Timeout of user <@{}> has been ended.",
+                    vote_handler.vote_counts.get(&msg_id).unwrap().0
+                ),
+            )
+            .await
+        {
+            println!("Error sending message: {:?}", why);
+        }
+        vote_handler.vote_counts.remove(&msg_id);
     }
 }
 
@@ -150,7 +188,7 @@ async fn init_type_map(data: &mut TypeMap) {
 
 #[async_trait]
 impl EventHandler for Handler {
-    // Message sent (anywhere) event
+    // XXX Message sent (anywhere) event
     async fn message(&self, ctx: Context, msg: Message) {
         // Check if the message content matches any command
         let commands = get_commands();
@@ -167,7 +205,7 @@ impl EventHandler for Handler {
         // else if (msg.content....) { }
     }
 
-    // Bot (self) joins server event
+    // XXX Bot (self) joins server event (-> init)
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!(
             "{}: {} is connected!",
@@ -180,7 +218,7 @@ impl EventHandler for Handler {
         init_type_map(&mut data).await;
     }
 
-    // Reaction added event
+    // XXX Reaction added event
     async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
         // bot-log channel id
         println!(
@@ -195,8 +233,10 @@ impl EventHandler for Handler {
         votekick_vote(&ctx, &reaction).await;
     }
 
+    // TODO Reaction removed event -> remove vote
+
     // ! if there are more uses for this event: extract user time tracking to a separate function
-    // Joined a voice channel event
+    // XXX Joined a voice channel event
     async fn voice_state_update(&self, _ctx: Context, old: Option<VoiceState>, new: VoiceState) {
         // load json to hashmap
         let mut users = json_helper::get_users();
